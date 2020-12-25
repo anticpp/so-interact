@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <time.h>
+#include <ctype.h>
 
 static struct termios origin_tm;
 
@@ -38,15 +39,27 @@ int enable_raw_mode() {
     return 0;
 }
 
-/* Format src buffer to be printable.
- * ascii => char
+/* Print buffer
+ * printable => char
  * '\r'  => '\r'
  * '\n'  => '\n'
+ * other => {HEX}
  * .... (to be added)
  */
-static int format_buffer(char *dst, size_t dst_size, 
-                const char *src, size_t src_size) {
-
+static void printbuf(FILE *s, char *buf, size_t n) {
+    char c;
+    for(int i=0; i<n; i++) {
+        c = buf[i];
+        if( isprint(c) ) {
+            fprintf(s, "%c", c);          
+        } else if( c=='\r' ) {
+            fprintf(s, "\\r");
+        } else if( c=='\n' ) {
+            fprintf(s, "\\n");
+        } else {
+            fprintf(s, "[%X]", c);
+        }
+    }
 }
 
 int main(int argc, char *argv[])
@@ -86,18 +99,16 @@ int main(int argc, char *argv[])
      *  We are now in raw mode.
      *  We have to print '\r' to left edge manually.
      */
-
-    fprintf(stderr, "input commands:\r\n");
-    fprintf(stderr, "h | help\r\n");
+    fprintf(stderr, "command 'h' for help.\r\n");
 
     char buf[1024] = {0};
     ssize_t bytes;
     while(1) {
         char c;
+        fprintf(stderr, "command > ");
         if( read(STDIN_FILENO, &c, 1)<0 ) {
             continue;
         }
-        fprintf(stderr, "command read '%c'\r\n", c);
         if( c=='h' ) {
             fprintf(stderr, "h | help\r\n");
             fprintf(stderr, "r | recv data\r\n");
@@ -107,19 +118,16 @@ int main(int argc, char *argv[])
             fprintf(stderr, "y | shutdown WRITE\r\n");
         } else if( c=='r' ) {
             fprintf(stderr, "Recving ...\r\n");
+            memset(buf, 0x00, sizeof(buf));
             bytes = recv(fd, buf, sizeof(buf), 0);
             if( bytes<0 ) {
                 fprintf(stderr, "recv error: %s\n", strerror(errno));
             } else if( bytes==0 ) {
                 fprintf(stderr, "other side closed\n");
             } else {
-                buf[bytes] = '\0';
-                if( buf[bytes-1]=='\n' ) {
-                    /* Strip '\n'
-                     */
-                    buf[bytes-1] = '\0';
-                }
-                printf("RECV (%d)'%s\\n'\r\n", strlen(buf)+1, buf);
+                printf("RECV %d bytes\r\n", strlen(buf));
+                printbuf(stdout, buf, strlen(buf));
+                printf("\r\n");
             }
         } else if( c=='s' ) {
             fprintf(stderr, "Sending ...\r\n");
@@ -131,15 +139,15 @@ int main(int argc, char *argv[])
             sprintf(buf, "[%s] Hello due\n", timeb);
             bytes = send(fd, buf, strlen(buf), 0);
             if( bytes<0 ) {
-                fprintf(stderr, "send error: %s\n", strerror(errno));
+                fprintf(stderr, "send error: %s\r\n", strerror(errno));
             } else {
-                buf[strlen(buf)-1] = '\0'; // Strip '\n'
-                printf("SEND (%d)'%s'\r\n", bytes, buf);
+                printf("SEND (%d) bytes\r\n", strlen(buf));
+                printbuf(stdout, buf, strlen(buf));
+                printf("\r\n");
             }
         } else if( c=='c' ) {
             fprintf(stderr, "Closing ...\r\n");
             close(fd);
-            break;
         } else if (c=='q') {
             fprintf(stderr, "Quit ...\r\n");
             break;
