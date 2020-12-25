@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <termios.h>
+#include <time.h>
 
 static struct termios origin_tm;
 
@@ -37,6 +38,16 @@ int enable_raw_mode() {
     return 0;
 }
 
+/* Format src buffer to be printable.
+ * ascii => char
+ * '\r'  => '\r'
+ * '\n'  => '\n'
+ * .... (to be added)
+ */
+static int format_buffer(char *dst, size_t dst_size, 
+                const char *src, size_t src_size) {
+
+}
 
 int main(int argc, char *argv[])
 {
@@ -79,7 +90,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "input commands:\r\n");
     fprintf(stderr, "h | help\r\n");
 
-    char buf[1024];
+    char buf[1024] = {0};
     ssize_t bytes;
     while(1) {
         char c;
@@ -108,10 +119,23 @@ int main(int argc, char *argv[])
                      */
                     buf[bytes-1] = '\0';
                 }
-                printf("RECV (%d)'%s'\r\n", strlen(buf), buf);
+                printf("RECV (%d)'%s\\n'\r\n", strlen(buf)+1, buf);
             }
         } else if( c=='s' ) {
             fprintf(stderr, "Sending ...\r\n");
+            memset(buf, 0x00, sizeof(buf));
+            char timeb[128] = {0};
+            time_t now = time(0);
+            ctime_r(&now, timeb); // ctime_r make ending with '\n'
+            timeb[strlen(timeb)-1] = '\0'; // Strip '\n'
+            sprintf(buf, "[%s] Hello due\n", timeb);
+            bytes = send(fd, buf, strlen(buf), 0);
+            if( bytes<0 ) {
+                fprintf(stderr, "send error: %s\n", strerror(errno));
+            } else {
+                buf[strlen(buf)-1] = '\0'; // Strip '\n'
+                printf("SEND (%d)'%s'\r\n", bytes, buf);
+            }
         } else if( c=='c' ) {
             fprintf(stderr, "Closing ...\r\n");
             close(fd);
