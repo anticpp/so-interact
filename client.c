@@ -7,6 +7,36 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <termios.h>
+
+static struct termios origin_tm;
+
+static void disable_raw_mode() {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &origin_tm);
+}
+
+int enable_raw_mode() {
+    struct termios tm;
+
+    if( !isatty(STDIN_FILENO) ) {
+        return 0;
+    }
+
+    if( tcgetattr(STDIN_FILENO, &origin_tm)<0 ) {
+        return -1;
+    }
+    tm = origin_tm;
+    cfmakeraw(&tm);
+
+    if( tcsetattr(STDIN_FILENO, TCSAFLUSH, &tm)<0 ) {
+        return -1;
+    }
+
+    // Reset attr on exit
+    atexit(disable_raw_mode);
+    return 0;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -25,7 +55,7 @@ int main(int argc, char *argv[])
     }
     struct sockaddr_in saddr;
     saddr.sin_family = AF_INET;
-    saddr.sin_port = port;
+    saddr.sin_port = htons(port);
     if( inet_pton(AF_INET, ip, &saddr.sin_addr)<0 ) {
         fprintf(stderr, "inet_pton error: %s, ip '%s'\n", strerror(errno), ip);
         return 1;      
@@ -36,24 +66,65 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    char rbuf[1024];
-    ssize_t rbytes;
+    if( enable_raw_mode() ) {
+        fprintf(stderr, "set raw mode to stdin error\n");
+        return 1;
+    }
+
+    /* Notice:
+     *  We are now in raw mode.
+     *  We have to print '\r' to left edge manually.
+     */
+
+    fprintf(stderr, "input commands:\r\n");
+    fprintf(stderr, "h | help\r\n");
+
+    char buf[1024];
+    ssize_t bytes;
     while(1) {
-        rbytes = recv(fd, rbuf, sizeof(rbuf), 0);
-        if( rbytes<0 ) {
-            if( errno==EAGAIN || errno==EWOULDBLOCK || errno==EINTR ) {
-                continue;
-            }
-            fprintf(stderr, "recv error: %s\n", strerror(errno));
-            break;
-        } else if( rbytes==0 ) {
-            fprintf(stderr, "other side closed\n");
+        char c;
+        if( read(STDIN_FILENO, &c, 1)<0 ) {
             continue;
         }
-        rbuf[rbytes] = '\0';
-        printf("RECV '%s'\n", rbuf);
+        fprintf(stderr, "command read '%c'\r\n", c);
+        if( c=='h' ) {
+            fprintf(stderr, "h | help\r\n");
+            fprintf(stderr, "r | recv data\r\n");
+            fprintf(stderr, "s | send data\r\n");
+            fprintf(stderr, "c | close data\r\n");
+            fprintf(stderr, "x | shutdown READ\r\n");
+            fprintf(stderr, "y | shutdown WRITE\r\n");
+        } else if( c=='r' ) {
+            fprintf(stderr, "Recving ...\r\n");
+            bytes = recv(fd, buf, sizeof(buf), 0);
+            if( bytes<0 ) {
+                fprintf(stderr, "recv error: %s\n", strerror(errno));
+            } else if( bytes==0 ) {
+                fprintf(stderr, "other side closed\n");
+            } else {
+                buf[bytes] = '\0';
+                if( buf[bytes-1]=='\n' ) {
+                    /* Strip '\n'
+                     */
+                    buf[bytes-1] = '\0';
+                }
+                printf("RECV (%d)'%s'\r\n", strlen(buf), buf);
+            }
+        } else if( c=='s' ) {
+            fprintf(stderr, "Sending ...\r\n");
+        } else if( c=='c' ) {
+            fprintf(stderr, "Closing ...\r\n");
+            close(fd);
+            break;
+        } else if (c=='q') {
+            fprintf(stderr, "Quit ...\r\n");
+            break;
+        }else {
+            fprintf(stderr, "Unknown command '%c'\r\n", c);
+            continue;
+        }
     }
-    fprintf(stderr, "closing now...\n");
-    close(fd);
+    fprintf(stderr, "Exiting ...\r\n");
+    
     return 0;
 }
