@@ -121,9 +121,9 @@ int main(int argc, char *argv[])
             memset(buf, 0x00, sizeof(buf));
             bytes = recv(fd, buf, sizeof(buf), 0);
             if( bytes<0 ) {
-                fprintf(stderr, "recv error: %s\n", strerror(errno));
+                fprintf(stderr, "recv error: %s\r\n", strerror(errno));
             } else if( bytes==0 ) {
-                fprintf(stderr, "other side closed\n");
+                fprintf(stderr, "other side closed\r\n");
             } else {
                 printf("RECV %d bytes\r\n", strlen(buf));
                 printbuf(stdout, buf, strlen(buf));
@@ -148,10 +148,22 @@ int main(int argc, char *argv[])
         } else if( c=='c' ) {
             fprintf(stderr, "Closing ...\r\n");
             close(fd);
-        } else if (c=='q') {
+        } else if ( c=='q' ) {
             fprintf(stderr, "Quit ...\r\n");
             break;
-        }else {
+        } else if ( c=='x') {
+            if( shutdown(fd, SHUT_RD)<0 ) {
+                fprintf(stderr, "shutdown error: %s\r\n", strerror(errno));
+            } else {
+                fprintf(stderr, "shutdown READ succ\r\n");
+            }
+        } else if ( c=='y') {
+            if( shutdown(fd, SHUT_WR)<0 ) {
+                fprintf(stderr, "shutdown error: %s\r\n", strerror(errno));
+            } else {
+                fprintf(stderr, "shutdown WRITE succ\r\n");
+            }
+        } else {
             fprintf(stderr, "Unknown command '%c'\r\n", c);
             continue;
         }
