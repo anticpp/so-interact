@@ -177,16 +177,30 @@ int main(int argc, char *argv[])
 #endif
 
 static void completion(const char *buf, linenoiseCompletions *lc) {
-    if (buf[0] == 'c') {
-        linenoiseAddCompletion(lc,"connect");
+    if ( buf[0]=='c' ) {
+        if( buf[1]=='o' ) {
+            linenoiseAddCompletion(lc, "connect");
+        } else if( buf[1]=='l' ) {
+            linenoiseAddCompletion(lc, "close");
+        } else {
+            linenoiseAddCompletion(lc, "connect");
+            linenoiseAddCompletion(lc, "close");
+        }
+    } else if( buf[0]=='s' ) {
+        linenoiseAddCompletion(lc, "shutdown");
+    } else if( buf[0]=='h' ) {
+        linenoiseAddCompletion(lc, "help");
     }
+
 }
 
 static char *hints(const char *buf, int *color, int *bold) {
+    *color = 35;
+    *bold = 0;
     if ( strcasecmp(buf,"connect")==0 ) {
-        *color = 35;
-        *bold = 0;
         return " ip port";
+    } else if( strcasecmp(buf, "shutdown")==0 ) {
+        return " \"read\" | \"write\"";
     }
     return NULL;
 }
@@ -387,13 +401,29 @@ int do_command_connect(int argc, char **args) {
     return 0;
 }
 
+int do_command_help(int argc, char **args) {
+    printf("help\n");
+    printf("\tShow help message\n\n");
+    printf("connect ip port\n");
+    printf("\tConnect to ip:port\n\n");
+    printf("read\n");
+    printf("\tRead from connection\n\n");
+    printf("write data\n");
+    printf("\tWrite `data` to connection\n\n");
+    printf("close\n");
+    printf("\tClose connection\n\n");
+    printf("shutdown read|write\n");
+    printf("\tShutdown connection\n\n");
+}
+
 typedef struct {
     const char *name;
     do_command handler;
 } command_s; 
 
 command_s commands[] = {
-    {"connect", do_command_connect}
+    {"connect", do_command_connect},
+    {"help", do_command_help}
 };
 
 #define HISTORY_LOG ".chistory.txt"
@@ -406,7 +436,7 @@ int main(int argc, char **argv) {
     char *line;
     int largc = 0;
     char *largs[MAX_ARG_SIZE];
-    while( (line=linenoise("client > "))!=NULL ) {
+    while( (line=linenoise("client > "))!=NULL) {
         largc = parse_args(line, largs, MAX_ARG_SIZE);
         if( largc<0 ) {
             fprintf(stderr, "Parse line error: '%s'\n", line);
