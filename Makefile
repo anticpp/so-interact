@@ -1,8 +1,10 @@
 
 all: client
 
-client: client.c
-	gcc $^ -o $@
+CFLAGS=-DDEBUG
+
+client: client.c linenoise/linenoise.c
+	gcc -I./ $^ -o $@
 
 clean:
-	rm -fv client
+	rm -fv client *.o

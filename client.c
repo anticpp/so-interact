@@ -10,7 +10,9 @@
 #include <termios.h>
 #include <time.h>
 #include <ctype.h>
+#include <linenoise/linenoise.h>
 
+#if 0
 static struct termios origin_tm;
 
 static void disable_raw_mode() {
@@ -170,5 +172,277 @@ int main(int argc, char *argv[])
     }
     fprintf(stderr, "Exiting ...\r\n");
     
+    return 0;
+}
+#endif
+
+static void completion(const char *buf, linenoiseCompletions *lc) {
+    if (buf[0] == 'c') {
+        linenoiseAddCompletion(lc,"connect");
+    }
+}
+
+static char *hints(const char *buf, int *color, int *bold) {
+    if ( strcasecmp(buf,"connect")==0 ) {
+        *color = 35;
+        *bold = 0;
+        return " ip port";
+    }
+    return NULL;
+}
+
+typedef enum {
+    s_closed = 0,
+    s_connected = 1,
+    s_shutdown_rd = 2,
+    s_shutdown_wr = 3
+} state_e;
+
+typedef struct {
+    state_e state; 
+    int cfd;
+} client_s;
+
+// Global client
+static client_s client;
+
+enum {
+    k_space = 32,
+    k_tab = 9
+};
+
+// -1:  parse error
+// >=0: args
+static int parse_args(const char *line, 
+                char **args, 
+                int max) {
+    int argc = 0;
+    const char *p1 = line;
+    const char *p2 = 0;
+
+    // Trim head
+    while( *p1==k_tab || *p1==k_space ) 
+        p1++;
+
+    while( *p1!='\0' ) {
+        p2 = strchr(p1, k_space);
+        if( !p2 ) {
+            p2 = strchr(p1, k_tab);
+            if( !p2 ) {
+                break;
+            }
+        }
+
+        if( argc>=max ) {
+            return -1;
+        }
+
+        // Push argument
+        args[argc] = malloc(p2-p1+1);
+        memcpy(args[argc], p1, p2-p1);
+        args[argc][p2-p1] = '\0';
+        argc ++;
+
+        // Trim tail
+        while( *p2==k_tab || *p2==k_space ) 
+            p2++;
+        p1 = p2;
+    }
+
+    // Last argument
+    if( *p1!='\0' ) {
+        if( argc>=max ) {
+            return -1;
+        }
+        
+        int n = strlen(p1)+1;
+        args[argc] = malloc(n);
+        memcpy(args[argc], p1, n);
+        args[argc][n] = '\0';
+        argc ++;
+    }
+    return argc;
+}
+
+static void print_args(int argc, char **args) {
+    for( int i=0; i<argc; i++ ) {
+        printf("args[%d] = '%s'\n", i, args[i]);
+    }
+}
+
+static void free_args(int argc, char **args) {
+    for( int i=0; i<argc; i++ ) {
+        free(args[i]);
+        args[i] = 0;
+    }
+}
+
+#define MAX_ARG_SIZE 20
+
+// TODO: Move test to test file
+int test_parse_args() {
+    struct test_data {
+        const char *line;
+        int argc;
+        char *args[MAX_ARG_SIZE];
+    } tests[] = {
+        // Empty
+        {"", 0, {}},
+
+        // Simple
+        {"hi", 1, {"hi"}} ,
+
+        // Head trim
+        {"  hi", 1, {"hi"}} ,      // Head SPACE
+        {"\thi", 1, {"hi"}} ,      // Head TAB
+        {"\t  hi", 1, {"hi"}} ,    // Head SPACE and TAB
+
+        // Tail trim
+        {"hi    ", 1, {"hi"}} ,    // Tail SPACE
+        {"hi\t", 1, {"hi"}} ,      // Tail TAB
+        {"hi   \t", 1, {"hi"}} ,   // Tail SPACE and TAB
+
+        // 2 arguments
+        {"hello supergui", 2, {"hello", "supergui"}}, // SPACE 
+        {"hello\tsupergui", 2, {"hello", "supergui"}}, // TAB
+        {"hello  \t  supergui", 2, {"hello", "supergui"}}, // SPACE and TAB
+        {"  \thello  \t  supergui  \t  ", 2, {"hello", "supergui"}}, // SPACE and TAB, Trim
+
+        // 3 arguments
+        {"set name supergui", 3, {"set", "name", "supergui"}}, // SPACE
+        {"set\tname\tsupergui", 3, {"set", "name", "supergui"}}, // TAB
+        {"set  \t  name  \t  supergui", 3, {"set", "name", "supergui"}}, // SPACE and TAB
+        {"  \tset  \t  name  \t  supergui  \t  ", 3, {"set", "name", "supergui"}}, // SPACE and TAB, Trim
+    };
+    
+    int size = sizeof(tests)/sizeof(struct test_data);
+    for( int i=0; i<size; i++ ) {
+        printf("Test ==> [%d]\n", i);
+        struct test_data *t = &tests[i];
+        int argc;
+        char *args[MAX_ARG_SIZE];
+        argc = parse_args(t->line, args, MAX_ARG_SIZE);
+
+        int succ = 1;
+        if( argc!=t->argc ) {
+            printf("argc(%d) != expected argc(%d)\n", argc, t->argc);
+            succ = 0;
+        } else {
+            if( argc>0 ) {
+                for( int j=0; j<argc; j++ ) {
+                    if( strcmp(args[j], t->args[j])!=0 ) {
+                        printf("args[%d]('%s') != expected args[%d]('%s')\n", j, args[j], j, t->args[j]);
+                        succ = 0;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if( argc>0 ) {
+            free_args(argc, args);
+        }
+
+        if( succ ) {
+            printf("success\n", i);
+        } else {
+            printf("fail\n", i);
+        }
+    }  
+    return 0;
+}
+
+typedef int (*do_command)(int argc, char **args);
+
+int do_command_connect(int argc, char **args) {
+    if( argc<3 ) {
+        printf("args error\n");
+        printf("Usage: %s ip port\n", args[0]);
+        return 1;
+    }
+
+    printf("do_command_connect\n");
+    const char *ip = args[1];
+    short port = atoi(args[2]);
+
+    client.cfd = socket(AF_INET, SOCK_STREAM, 0);
+    if( client.cfd<0 ) {
+        fprintf(stderr, "create socket error: %s\n", strerror(errno));
+        return 1;      
+    }
+    struct sockaddr_in saddr;
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(port);
+    if( inet_pton(AF_INET, ip, &saddr.sin_addr)<0 ) {
+        fprintf(stderr, "inet_pton error: %s, ip '%s'\n", strerror(errno), ip);
+        return 1;      
+    }
+
+    if( connect(client.cfd, (struct sockaddr*)&saddr, sizeof(saddr))<0 ) {
+        fprintf(stderr, "connect to %s:%d error: %s\n", ip, port, strerror(errno));
+        return 1;
+    }
+
+    printf("connect to %s:%d success\n", ip, port);
+    return 0;
+}
+
+typedef struct {
+    const char *name;
+    do_command handler;
+} command_s; 
+
+command_s commands[] = {
+    {"connect", do_command_connect}
+};
+
+#define HISTORY_LOG ".chistory.txt"
+
+int main(int argc, char **argv) {
+    linenoiseSetCompletionCallback(completion);
+    linenoiseSetHintsCallback(hints);
+    linenoiseHistoryLoad(HISTORY_LOG);
+
+    char *line;
+    int largc = 0;
+    char *largs[MAX_ARG_SIZE];
+    while( (line=linenoise("client > "))!=NULL ) {
+        largc = parse_args(line, largs, MAX_ARG_SIZE);
+        if( largc<0 ) {
+            fprintf(stderr, "Parse line error: '%s'\n", line);
+            continue;
+        } else if( largc==0 ) {
+            // empty line
+            continue;
+        }
+
+        linenoiseHistoryAdd(line);
+        linenoiseHistorySave(HISTORY_LOG);
+
+        int i = 0;
+        int cmd_n = sizeof(commands)/sizeof(command_s);
+        for( ; i<cmd_n; i++ ) {
+            if( strcmp(largs[0], commands[i].name)!=0 ) {
+                continue;
+            }
+            commands[i].handler(largc, largs);
+            break;
+        }
+        if( i==cmd_n ) {
+            fprintf(stderr, "Command not found: '%s'\n", largs[0]);
+        }
+
+        #if 0
+        /* Do something with the string. */
+        if (line[0] != '\0' && line[0] != '/') {
+            printf("echo: '%s'\n", line);
+            linenoiseHistoryAdd(line); /* Add to the history. */
+            linenoiseHistorySave("history.txt"); /* Save the history on disk. */
+        }
+        #endif
+
+        free_args(largc, largs);
+        free(line);
+    }
     return 0;
 }
