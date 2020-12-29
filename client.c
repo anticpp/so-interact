@@ -206,6 +206,7 @@ static int do_command_close(int argc, char **args);
 
 typedef struct {
     const char *name;
+    int argc; // Arguments required
 
     /* For help message */
     const char *help_args;   // 0 or "" if no additional arguments
@@ -215,13 +216,13 @@ typedef struct {
 } command_s; 
 
 command_s commands[] = {
-    {"help", 0, "Help message", do_command_help},
-    {"state", 0, "Show connection state", do_command_state},
-    {"connect", "`ip` `port`", "Make connection", do_command_connect},
-    {"read", 0, "Read data from connection", do_command_read},
-    {"write", "`message`", "Write `message` to connection", 0},
-    {"close", 0, "Close connection", do_command_close},
-    {"shutdown", "[read|write]", "Shutdown connection", 0},
+    {"help", 0, 0, "Help message", do_command_help},
+    {"state", 0, 0, "Show connection state", do_command_state},
+    {"connect", 2, "`ip` `port`", "Make connection", do_command_connect},
+    {"read", 0, 0, "Read data from connection", do_command_read},
+    {"write", 1, "`message`", "Write `message` to connection", do_command_write},
+    {"close", 0, 0, "Close connection", do_command_close},
+    {"shutdown", 1, "[read|write]", "Shutdown connection", 0},
 };
 
 static void completion(const char *buf, linenoiseCompletions *lc) {
@@ -414,12 +415,6 @@ int test_parse_args() {
 }
 
 int do_command_connect(int argc, char **args) {
-    if( argc<3 ) {
-        printf("args error\n");
-        printf("Usage: %s ip port\n", args[0]);
-        return 1;
-    }
-
     const char *ip = args[1];
     short port = atoi(args[2]);
 
@@ -456,10 +451,10 @@ int do_command_connect(int argc, char **args) {
 int do_command_read(int argc, char **args) {
     if( client.state!=s_connected ) {
         printf("Error state: `%s`\n", state_str[client.state]);
-        printf("Can't read a closed connection.\n");
+        printf("Can't read on closed connection.\n");
         return 1;
     }
-    printf("Recving ...\n");
+    printf("Reading ...\n");
 
     char buf[1024] = {0};
     size_t bytes = recv(client.cfd, buf, sizeof(buf), 0);
@@ -474,7 +469,22 @@ int do_command_read(int argc, char **args) {
     printbuf(stdout, buf, strlen(buf));
     printf("\'\n");
 }
+
 int do_command_write(int argc, char **args) {
+    if( client.state!=s_connected ) {
+        printf("Error state: `%s`\n", state_str[client.state]);
+        printf("Can't write on closed connection.\n");
+        return 1;
+    }
+    printf("Writing ...\n");
+
+    char *sbuf = args[1];
+    size_t bytes = send(client.cfd, sbuf, strlen(sbuf), 0);
+    if( bytes<0 ) {
+        fprintf(stderr, "send error: %s\r\n", strerror(errno));
+        return 1;
+    }
+    printf("(%d)\'%s\'\n", bytes, sbuf);
 }
 
 int do_command_close(int argc, char **args) {
@@ -538,11 +548,17 @@ int main(int argc, char **argv) {
         int i = 0;
         int cmd_n = sizeof(commands)/sizeof(command_s);
         for( ; i<cmd_n; i++ ) {
-            if( strcmp(largs[0], commands[i].name)!=0 ) {
+            command_s *cmd = &commands[i];
+            if( strcmp(largs[0], cmd->name)!=0 ) {
                 continue;
             }
-            if( commands[i].handler ) {
-                commands[i].handler(largc, largs);
+            if( largc<cmd->argc+1 ) {
+                fprintf(stderr, "arguments error\n");
+                fprintf(stderr, "usage: %s %s\n", cmd->name, cmd->help_args);
+                break;
+            } 
+            if( cmd->handler ) {
+                cmd->handler(largc, largs);
             }
             break;
         }
