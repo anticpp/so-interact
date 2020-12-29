@@ -13,7 +13,15 @@ make all
 ./unit_test
 ```
 
+## Usage
+
+```
+echo "help" | ./client
+```
+
 ## TODO
 
 - Use unit framework
 - server mode
+
+
