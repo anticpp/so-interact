@@ -1,5 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdio.h> 
+#include <stdlib.h> 
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -168,13 +168,31 @@ int main(int argc, char *argv[])
         } else {
             fprintf(stderr, "Unknown command '%c'\r\n", c);
             continue;
+        } } fprintf(stderr, "Exiting ...\r\n"); return 0; }
+#endif
+
+/* Print buffer
+ * printable => char
+ * '\r'  => '\r'
+ * '\n'  => '\n'
+ * other => {HEX}
+ * .... (to be added)
+ */
+static void printbuf(FILE *s, char *buf, size_t n) {
+    char c;
+    for(int i=0; i<n; i++) {
+        c = buf[i];
+        if( isprint(c) ) {
+            fprintf(s, "%c", c);          
+        } else if( c=='\r' ) {
+            fprintf(s, "\\r");
+        } else if( c=='\n' ) {
+            fprintf(s, "\\n");
+        } else {
+            fprintf(s, "[%X]", c);
         }
     }
-    fprintf(stderr, "Exiting ...\r\n");
-    
-    return 0;
 }
-#endif
 
 /* Commands */
 typedef int (*do_command)(int argc, char **args);
@@ -182,6 +200,8 @@ typedef int (*do_command)(int argc, char **args);
 static int do_command_help(int argc, char **args);
 static int do_command_state(int argc, char **args);
 static int do_command_connect(int argc, char **args);
+static int do_command_read(int argc, char **args);
+static int do_command_write(int argc, char **args);
 static int do_command_close(int argc, char **args);
 
 typedef struct {
@@ -198,7 +218,7 @@ command_s commands[] = {
     {"help", 0, "Help message", do_command_help},
     {"state", 0, "Show connection state", do_command_state},
     {"connect", "`ip` `port`", "Make connection", do_command_connect},
-    {"read", 0, "Read data from connection", 0},
+    {"read", 0, "Read data from connection", do_command_read},
     {"write", "`message`", "Write `message` to connection", 0},
     {"close", 0, "Close connection", do_command_close},
     {"shutdown", "[read|write]", "Shutdown connection", 0},
@@ -431,6 +451,30 @@ int do_command_connect(int argc, char **args) {
     client.state = s_connected;
     printf("Connected %s:%d \n", ip, port);
     return 0;
+}
+
+int do_command_read(int argc, char **args) {
+    if( client.state!=s_connected ) {
+        printf("Error state: `%s`\n", state_str[client.state]);
+        printf("Can't read a closed connection.\n");
+        return 1;
+    }
+    printf("Recving ...\n");
+
+    char buf[1024] = {0};
+    size_t bytes = recv(client.cfd, buf, sizeof(buf), 0);
+    if( bytes<0 ) {
+        printf("recv error: %s\r\n", strerror(errno));
+        return 1;
+    } else if( bytes==0 ) {
+        printf("other side closed\r\n");
+        return 1;
+    }
+    printf("(%d)\'", bytes);
+    printbuf(stdout, buf, strlen(buf));
+    printf("\'\n");
+}
+int do_command_write(int argc, char **args) {
 }
 
 int do_command_close(int argc, char **args) {
