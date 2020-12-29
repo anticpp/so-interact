@@ -1,12 +1,1 @@
-
-```
-
-nc -kl -4 127.0.0.1 20012
-
-./client 127.0.0.1 20012
-```
-
-## TODO
-
-
-- Use `linenoise`
+Interaction tool(using `linenoise`) to control every step of socket api. This is a good tool to test low primitive socket api, program will stop and wait until you interact with a command.
