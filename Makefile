@@ -4,8 +4,8 @@ BIN=client unit_test
 all: $(BIN)
 
 init:
-	@git module init
-	@git module update
+	@git submodule init
+	@git submodule update
 
 client: client.c linenoise/linenoise.c
 	gcc -I./ $^ -o $@
