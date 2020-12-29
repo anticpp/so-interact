@@ -176,41 +176,72 @@ int main(int argc, char *argv[])
 }
 #endif
 
-static void completion(const char *buf, linenoiseCompletions *lc) {
-    if ( buf[0]=='c' ) {
-        if( buf[1]=='o' ) {
-            linenoiseAddCompletion(lc, "connect");
-        } else if( buf[1]=='l' ) {
-            linenoiseAddCompletion(lc, "close");
-        } else {
-            linenoiseAddCompletion(lc, "connect");
-            linenoiseAddCompletion(lc, "close");
-        }
-    } else if( buf[0]=='s' ) {
-        linenoiseAddCompletion(lc, "shutdown");
-    } else if( buf[0]=='h' ) {
-        linenoiseAddCompletion(lc, "help");
-    }
+/* Commands */
+typedef int (*do_command)(int argc, char **args);
 
+static int do_command_connect(int argc, char **args);
+static int do_command_state(int argc, char **args);
+static int do_command_help(int argc, char **args);
+
+typedef struct {
+    const char *name;
+
+    /* For help message */
+    const char *help_args;   // 0 or "" if no additional arguments
+    const char *help_message;
+
+    do_command handler;
+} command_s; 
+
+command_s commands[] = {
+    {"help", 0, "Help message", do_command_help},
+    {"state", 0, "Show connection state", do_command_state},
+    {"connect", "`ip` `port`", "Make connection", do_command_connect},
+    {"read", 0, "Read data from connection", 0},
+    {"write", "`message`", "Write `message` to connection", 0},
+    {"close", 0, "Close connection", 0},
+    {"shutdown", "[read|write]", "Shutdown connection", 0},
+};
+
+static void completion(const char *buf, linenoiseCompletions *lc) {
+    int n = strlen(buf);
+    for(int i=0; i<sizeof(commands)/sizeof(command_s); i++) {
+        command_s *cmd = &commands[i];
+        if( strncasecmp(buf, cmd->name, n)==0 ) {
+            linenoiseAddCompletion(lc, cmd->name);
+        }  
+    }
 }
 
 static char *hints(const char *buf, int *color, int *bold) {
     *color = 35;
     *bold = 0;
-    if ( strcasecmp(buf,"connect")==0 ) {
+
+    int tmp_size = 256;
+    char *tmp = malloc(tmp_size);
+    for(int i=0; i<sizeof(commands)/sizeof(command_s); i++) {
+        command_s *cmd = &commands[i];
+        if( strcasecmp(buf, cmd->name)==0 &&
+                        cmd->help_args!=0 && 
+                        strlen(cmd->help_args)!=0 ) {
+            snprintf(tmp, tmp_size, " %s", cmd->help_args); // " " + cmd->help_args
+            return tmp;
+        }
+    }
+    /*if ( strcasecmp(buf,"connect")==0 ) {
         return " ip port";
     } else if( strcasecmp(buf, "shutdown")==0 ) {
         return " \"read\" | \"write\"";
-    }
+    }*/
     return NULL;
 }
 
 typedef enum {
     s_closed = 0,
     s_connected = 1,
-    s_shutdown_rd = 2,
-    s_shutdown_wr = 3
 } state_e;
+
+const char *state_str[] = {"s_closed", "s_connected"};
 
 typedef struct {
     state_e state; 
@@ -295,7 +326,7 @@ static void free_args(int argc, char **args) {
 
 // TODO: Move test to test file
 int test_parse_args() {
-    struct test_data {
+    struct test_data_s_ {
         const char *line;
         int argc;
         char *args[MAX_ARG_SIZE];
@@ -329,10 +360,10 @@ int test_parse_args() {
         {"  \tset  \t  name  \t  supergui  \t  ", 3, {"set", "name", "supergui"}}, // SPACE and TAB, Trim
     };
     
-    int size = sizeof(tests)/sizeof(struct test_data);
+    int size = sizeof(tests)/sizeof(struct test_data_s_);
     for( int i=0; i<size; i++ ) {
         printf("Test ==> [%d]\n", i);
-        struct test_data *t = &tests[i];
+        struct test_data_s_ *t = &tests[i];
         int argc;
         char *args[MAX_ARG_SIZE];
         argc = parse_args(t->line, args, MAX_ARG_SIZE);
@@ -366,7 +397,7 @@ int test_parse_args() {
     return 0;
 }
 
-typedef int (*do_command)(int argc, char **args);
+
 
 int do_command_connect(int argc, char **args) {
     if( argc<3 ) {
@@ -378,6 +409,11 @@ int do_command_connect(int argc, char **args) {
     printf("do_command_connect\n");
     const char *ip = args[1];
     short port = atoi(args[2]);
+
+    if( client.state!=s_closed ) {
+        printf("Error: already connected.");
+        return 1;
+    }
 
     client.cfd = socket(AF_INET, SOCK_STREAM, 0);
     if( client.cfd<0 ) {
@@ -401,32 +437,27 @@ int do_command_connect(int argc, char **args) {
     return 0;
 }
 
-int do_command_help(int argc, char **args) {
-    printf("help\n");
-    printf("\tShow help message\n\n");
-    printf("connect ip port\n");
-    printf("\tConnect to ip:port\n\n");
-    printf("read\n");
-    printf("\tRead from connection\n\n");
-    printf("write data\n");
-    printf("\tWrite `data` to connection\n\n");
-    printf("close\n");
-    printf("\tClose connection\n\n");
-    printf("shutdown read|write\n");
-    printf("\tShutdown connection\n\n");
+int do_command_state(int argc, char **args) {
+    printf("%s", state_str[client.state]);
 }
 
-typedef struct {
-    const char *name;
-    do_command handler;
-} command_s; 
+int do_command_help(int argc, char **args) {
+    char tmp[256];
+    for(int i=0; i<sizeof(commands)/sizeof(command_s); i++) {
+        command_s *cmd = &commands[i];
+        if( cmd->help_args==0 || strlen(cmd->help_args)==0 ) {
+            snprintf(tmp, sizeof(tmp), "%s", cmd->name); 
+        } else {
+            snprintf(tmp, sizeof(tmp), "%s %s", cmd->name, cmd->help_args);
+        }
+        printf("%-30s%s\n", tmp, cmd->help_message);
+    }
+    return 0;
+}
 
-command_s commands[] = {
-    {"connect", do_command_connect},
-    {"help", do_command_help}
-};
 
 #define HISTORY_LOG ".chistory.txt"
+#define PROMPT "client > "
 
 int main(int argc, char **argv) {
     linenoiseSetCompletionCallback(completion);
@@ -436,7 +467,7 @@ int main(int argc, char **argv) {
     char *line;
     int largc = 0;
     char *largs[MAX_ARG_SIZE];
-    while( (line=linenoise("client > "))!=NULL) {
+    while( (line=linenoise(PROMPT))!=NULL) {
         largc = parse_args(line, largs, MAX_ARG_SIZE);
         if( largc<0 ) {
             fprintf(stderr, "Parse line error: '%s'\n", line);
@@ -455,7 +486,9 @@ int main(int argc, char **argv) {
             if( strcmp(largs[0], commands[i].name)!=0 ) {
                 continue;
             }
-            commands[i].handler(largc, largs);
+            if( commands[i].handler ) {
+                commands[i].handler(largc, largs);
+            }
             break;
         }
         if( i==cmd_n ) {
