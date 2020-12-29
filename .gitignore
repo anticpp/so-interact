@@ -1,6 +1,7 @@
 *.o
 server
 client
+unit_test
 
 .chistory.txt
 tags
