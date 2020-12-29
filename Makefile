@@ -1,8 +1,18 @@
 
-all: client
+BIN=client unit_test
 
-client: client.c
-	gcc $^ -o $@
+all: $(BIN)
+
+init:
+	@git module init
+	@git module update
+
+client: client.c linenoise/linenoise.c
+	gcc -I./ $^ -o $@
+
+unit_test: unit_test.c
+	gcc -I./ $^ -o $@
+
 
 clean:
-	rm -fv client
+	rm -fv $(BIN) *.o
