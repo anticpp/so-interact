@@ -179,9 +179,10 @@ int main(int argc, char *argv[])
 /* Commands */
 typedef int (*do_command)(int argc, char **args);
 
-static int do_command_connect(int argc, char **args);
-static int do_command_state(int argc, char **args);
 static int do_command_help(int argc, char **args);
+static int do_command_state(int argc, char **args);
+static int do_command_connect(int argc, char **args);
+static int do_command_close(int argc, char **args);
 
 typedef struct {
     const char *name;
@@ -199,7 +200,7 @@ command_s commands[] = {
     {"connect", "`ip` `port`", "Make connection", do_command_connect},
     {"read", 0, "Read data from connection", 0},
     {"write", "`message`", "Write `message` to connection", 0},
-    {"close", 0, "Close connection", 0},
+    {"close", 0, "Close connection", do_command_close},
     {"shutdown", "[read|write]", "Shutdown connection", 0},
 };
 
@@ -228,11 +229,6 @@ static char *hints(const char *buf, int *color, int *bold) {
             return tmp;
         }
     }
-    /*if ( strcasecmp(buf,"connect")==0 ) {
-        return " ip port";
-    } else if( strcasecmp(buf, "shutdown")==0 ) {
-        return " \"read\" | \"write\"";
-    }*/
     return NULL;
 }
 
@@ -397,8 +393,6 @@ int test_parse_args() {
     return 0;
 }
 
-
-
 int do_command_connect(int argc, char **args) {
     if( argc<3 ) {
         printf("args error\n");
@@ -406,12 +400,13 @@ int do_command_connect(int argc, char **args) {
         return 1;
     }
 
-    printf("do_command_connect\n");
     const char *ip = args[1];
     short port = atoi(args[2]);
 
     if( client.state!=s_closed ) {
-        printf("Error: already connected.");
+        printf("Error state: `%s`\n", state_str[client.state]);
+        printf("Already connected.\n");
+        printf("Close it before making a new connection.\n");
         return 1;
     }
 
@@ -433,12 +428,24 @@ int do_command_connect(int argc, char **args) {
         return 1;
     }
 
-    printf("connect to %s:%d success\n", ip, port);
+    client.state = s_connected;
+    printf("Connected %s:%d \n", ip, port);
     return 0;
 }
 
+int do_command_close(int argc, char **args) {
+    if( client.state!=s_connected ) {
+        printf("Error state: `%s`.\n", state_str[client.state]);
+        printf("Not connected.\n");
+        return 1;
+    }
+    close(client.cfd);
+    client.state = s_closed;
+    printf("Closed\n");
+}
+
 int do_command_state(int argc, char **args) {
-    printf("%s", state_str[client.state]);
+    printf("%s\n", state_str[client.state]);
 }
 
 int do_command_help(int argc, char **args) {
@@ -460,6 +467,10 @@ int do_command_help(int argc, char **args) {
 #define PROMPT "client > "
 
 int main(int argc, char **argv) {
+    /* Init client */
+    client.state = s_closed;
+    client.cfd = 0;
+
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
     linenoiseHistoryLoad(HISTORY_LOG);
@@ -494,15 +505,6 @@ int main(int argc, char **argv) {
         if( i==cmd_n ) {
             fprintf(stderr, "Command not found: '%s'\n", largs[0]);
         }
-
-        #if 0
-        /* Do something with the string. */
-        if (line[0] != '\0' && line[0] != '/') {
-            printf("echo: '%s'\n", line);
-            linenoiseHistoryAdd(line); /* Add to the history. */
-            linenoiseHistorySave("history.txt"); /* Save the history on disk. */
-        }
-        #endif
 
         free_args(largc, largs);
         free(line);
