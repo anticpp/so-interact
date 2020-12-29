@@ -203,6 +203,7 @@ static int do_command_connect(int argc, char **args);
 static int do_command_read(int argc, char **args);
 static int do_command_write(int argc, char **args);
 static int do_command_close(int argc, char **args);
+static int do_command_shutdown(int argc, char **args);
 
 typedef struct {
     const char *name;
@@ -222,7 +223,7 @@ command_s commands[] = {
     {"read", 0, 0, "Read data from connection", do_command_read},
     {"write", 1, "`message`", "Write `message` to connection", do_command_write},
     {"close", 0, 0, "Close connection", do_command_close},
-    {"shutdown", 1, "[read|write]", "Shutdown connection", 0},
+    {"shutdown", 1, "read|write", "Shutdown connection", do_command_shutdown},
 };
 
 static void completion(const char *buf, linenoiseCompletions *lc) {
@@ -462,7 +463,7 @@ int do_command_read(int argc, char **args) {
         printf("recv error: %s\r\n", strerror(errno));
         return 1;
     } else if( bytes==0 ) {
-        printf("other side closed\r\n");
+        printf("Read EOF\r\n");
         return 1;
     }
     printf("(%d)\'", bytes);
@@ -496,6 +497,28 @@ int do_command_close(int argc, char **args) {
     close(client.cfd);
     client.state = s_closed;
     printf("Closed\n");
+}
+
+int do_command_shutdown(int argc, char **args) {
+    if( client.state!=s_connected ) {
+        printf("Error state: `%s`.\n", state_str[client.state]);
+        printf("Not connected.\n");
+        return 1;
+    }
+    int flag = 0;
+    if( strcmp(args[1], "read")==0 ) {
+        flag = SHUT_RD;
+    } else if ( strcmp(args[1], "write")==0 ) {
+        flag = SHUT_WR;
+    } else {
+        printf("Invalid shutdown mode `%s`\n", args[1]);
+        return 1;
+    }
+    if( shutdown(client.cfd, flag)<0 ) {
+        printf("shutdown error: %s\n", strerror(errno));
+        return 1;
+    }
+    printf("OK\n");
 }
 
 int do_command_state(int argc, char **args) {
