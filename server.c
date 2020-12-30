@@ -19,7 +19,7 @@
 /* Linenoise callback */
 static void completion(const char *buf, linenoiseCompletions *lc);
 static char *hints(const char *buf, int *color, int *bold);
-
+/*
 static int do_command_help(int argc, char **args);
 static int do_command_state(int argc, char **args);
 static int do_command_connect(int argc, char **args);
@@ -27,15 +27,29 @@ static int do_command_read(int argc, char **args);
 static int do_command_write(int argc, char **args);
 static int do_command_close(int argc, char **args);
 static int do_command_shutdown(int argc, char **args);
+*/
+static int do_command_help(int argc, char **args);
+static int do_command_state(int argc, char **args);
+static int do_command_listen(int argc, char **args);
 
 static command_t commands[] = {
     {"help", 0, 0, "Help message", do_command_help},
-    {"state", 0, 0, "Show connection state", do_command_state},
+    {"state", 0, 0, "Show listen state", do_command_state},
+    {"listen", 2, "`ip` `port`", "Listen on ip:port", do_command_listen},
+    /*{"help", 0, 0, "Help message", do_command_help},
+    {"state", }
+    {"accept", }
+    {"read", }
+    {"write", }
+    {"close", }
+    {"shutdown", }*/
+ /*   {"help", 0, 0, "Help message", do_command_help},
     {"connect", 2, "`ip` `port`", "Make connection", do_command_connect},
     {"read", 0, 0, "Read data from connection", do_command_read},
     {"write", 1, "`message`", "Write `message` to connection", do_command_write},
     {"close", 0, 0, "Close connection", do_command_close},
     {"shutdown", 1, "read|write", "Shutdown connection", do_command_shutdown},
+    */
 };
 static int commands_n = sizeof(commands)/sizeof(command_t);
 
@@ -45,27 +59,31 @@ static inline command_t* mylookup(const char* name) {
 
 /* Connection state */
 typedef enum {
-    s_closed = 0,
-    s_connected = 1,
+    s_init = 0,
+    s_listen = 1,
 } state_t;
 
-const char *state_str[] = {"s_closed", "s_connected"};
+const char *state_str[] = {"s_init", "s_listen"};
 
-/* client */
+#define MAX_CLIENT_N 100
+
+/* server */
 typedef struct {
     state_t state; 
-    int cfd;
-} client_t;
+    int sfd;
+    int cfds[MAX_CLIENT_N]; // Client fds
+} server_t;
 
-static client_t client;
+static server_t server;
 
-#define HISTORY_LOG ".chistory.txt"
-#define PROMPT "client > "
+#define HISTORY_LOG ".shistory.txt"
+#define PROMPT "server > "
 
 int main(int argc, char **argv) {
-    /* Init client */
-    client.state = s_closed;
-    client.cfd = 0;
+    /* Init server */
+    server.state = s_init;
+    server.sfd = 0;
+    memset(server.cfds, 0x00, MAX_CLIENT_N*sizeof(int));
 
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
@@ -132,117 +150,6 @@ char *hints(const char *buf, int *color, int *bold) {
     return NULL;
 }
 
-int do_command_connect(int argc, char **args) {
-    const char *ip = args[1];
-    short port = atoi(args[2]);
-
-    if( client.state!=s_closed ) {
-        printf("Error state: `%s`\n", state_str[client.state]);
-        printf("Already connected.\n");
-        printf("Close it before making a new connection.\n");
-        return 1;
-    }
-
-    client.cfd = socket(AF_INET, SOCK_STREAM, 0);
-    if( client.cfd<0 ) {
-        fprintf(stderr, "create socket error: %s\n", strerror(errno));
-        return 1;      
-    }
-    struct sockaddr_in saddr;
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(port);
-    if( inet_pton(AF_INET, ip, &saddr.sin_addr)<0 ) {
-        fprintf(stderr, "inet_pton error: %s, ip '%s'\n", strerror(errno), ip);
-        return 1;      
-    }
-
-    if( connect(client.cfd, (struct sockaddr*)&saddr, sizeof(saddr))<0 ) {
-        fprintf(stderr, "connect to %s:%d error: %s\n", ip, port, strerror(errno));
-        return 1;
-    }
-
-    client.state = s_connected;
-    printf("Connected %s:%d \n", ip, port);
-    return 0;
-}
-
-int do_command_read(int argc, char **args) {
-    if( client.state!=s_connected ) {
-        printf("Error state: `%s`\n", state_str[client.state]);
-        printf("Can't read on closed connection.\n");
-        return 1;
-    }
-    printf("Reading ...\n");
-
-    char buf[1024] = {0};
-    size_t bytes = recv(client.cfd, buf, sizeof(buf), 0);
-    if( bytes<0 ) {
-        printf("recv error: %s\n", strerror(errno));
-        return 1;
-    } else if( bytes==0 ) {
-        printf("Read EOF\n");
-        return 1;
-    }
-    printf("(%d)\'", bytes);
-    printbuf(stdout, buf, strlen(buf));
-    printf("\'\n");
-}
-
-int do_command_write(int argc, char **args) {
-    if( client.state!=s_connected ) {
-        printf("Error state: `%s`\n", state_str[client.state]);
-        printf("Can't write on closed connection.\n");
-        return 1;
-    }
-    printf("Writing ...\n");
-
-    char *sbuf = args[1];
-    size_t bytes = send(client.cfd, sbuf, strlen(sbuf), 0);
-    if( bytes<0 ) {
-        fprintf(stderr, "send error: %s\n", strerror(errno));
-        return 1;
-    }
-    printf("(%d)\'%s\'\n", bytes, sbuf);
-}
-
-int do_command_close(int argc, char **args) {
-    if( client.state!=s_connected ) {
-        printf("Error state: `%s`.\n", state_str[client.state]);
-        printf("Not connected.\n");
-        return 1;
-    }
-    close(client.cfd);
-    client.cfd = 0;
-    client.state = s_closed;
-    printf("Closed\n");
-}
-
-int do_command_shutdown(int argc, char **args) {
-    if( client.state!=s_connected ) {
-        printf("Error state: `%s`.\n", state_str[client.state]);
-        printf("Not connected.\n");
-        return 1;
-    }
-    int flag = 0;
-    if( strcmp(args[1], "read")==0 ) {
-        flag = SHUT_RD;
-    } else if ( strcmp(args[1], "write")==0 ) {
-        flag = SHUT_WR;
-    } else {
-        printf("Invalid shutdown mode `%s`\n", args[1]);
-        return 1;
-    }
-    if( shutdown(client.cfd, flag)<0 ) {
-        printf("shutdown error: %s\n", strerror(errno));
-        return 1;
-    }
-    printf("OK\n");
-}
-
-int do_command_state(int argc, char **args) {
-    printf("%s\n", state_str[client.state]);
-}
-
 int do_command_help(int argc, char **args) {
     char tmp[256];
     for( int i=0; i<commands_n; i++ ) {
@@ -256,4 +163,58 @@ int do_command_help(int argc, char **args) {
     }
     return 0;
 }
+
+int do_command_state(int argc, char **args) {
+    printf("%s\n", state_str[server.state]);
+}
+
+int do_command_listen(int argc, char **args) {
+    const char *ip = args[1];
+    short port = atoi(args[2]);
+
+    if( server.state!=s_init ) {
+        printf("Error state: `%s`\n", state_str[server.state]);
+        printf("Already listen.\n");
+        printf("Close current listen before next.\n");
+        return 1;
+    }
+
+    server.sfd = socket(AF_INET, SOCK_STREAM, 0);
+    if( server.sfd<0 ) {
+        fprintf(stderr, "create socket error: %s\n", strerror(errno));
+        return 1;      
+    }
+
+    struct sockaddr_in saddr;
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(port);
+    if( inet_pton(AF_INET, ip, &saddr.sin_addr)<0 ) {
+        printf("inet_pton error: %s, ip '%s'\n", strerror(errno), ip);
+        close(server.sfd);
+        return 1;      
+    }
+
+    int v = 1;
+    if( setsockopt(server.sfd, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(v)) ) {
+        printf("setsockopt(SO_REUSEADDR) error: %s\n", strerror(errno));
+        close(server.sfd);
+        return 1;      
+    }
+
+    if( bind(server.sfd, (struct sockaddr*)&saddr, sizeof(saddr))<0 ) {
+        printf("bind error: %s\n", strerror(errno));
+        close(server.sfd);
+        return 1;      
+    }
+
+    if( listen(server.sfd, 100)<0 ) {
+        printf("listen error: %s\n", strerror(errno));
+        close(server.sfd);
+        return 1;      
+    } 
+
+    server.state = s_listen;
+    printf("Listen %s:%d succ \n", ip, port);
+}
+
 
