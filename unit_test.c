@@ -39,46 +39,46 @@ int test_parse_args() {
         {"  \tset  \t  name  \t  supergui  \t  ", 3, {"set", "name", "supergui"}}, // SPACE and TAB, Trim
     };
     
+    int ret = 0;
     int size = sizeof(tests)/sizeof(struct test_data_s_);
     for( int i=0; i<size; i++ ) {
-        printf("Test ==> [%d]\n", i);
         struct test_data_s_ *t = &tests[i];
         int argc;
         char *args[MAX_ARG_SIZE];
         argc = parse_args(t->line, args, MAX_ARG_SIZE);
-
-        int succ = 1;
-        if( argc!=t->argc ) {
-            printf("argc(%d) != expected argc(%d)\n", argc, t->argc);
-            succ = 0;
+        if( argc<0 ) {
+            printf("[Test %d] parse_args errror\n", i);
+            ret = 1;
+        } else if( argc!=t->argc ) {
+            printf("[Test %d] argc(%d) != expected argc(%d)\n", i, argc, t->argc);
+            ret = 1;
         } else {
-            if( argc>0 ) {
-                for( int j=0; j<argc; j++ ) {
-                    if( strcmp(args[j], t->args[j])!=0 ) {
-                        printf("args[%d]('%s') != expected args[%d]('%s')\n", j, args[j], j, t->args[j]);
-                        succ = 0;
-                        break;
-                    }
+            int j = 0;
+            for( ; j<argc; j++ ) {
+                if( strcmp(args[j], t->args[j])!=0 ) {
+                    printf("[Test %d] args[%d]('%s') != expected args[%d]('%s')\n", i, j, args[j], j, t->args[j]);
+                    break;
                 }
+            }
+            
+            /* Not totally matched */ 
+            if( j!=argc ) {
+                ret = 1;
             }
         }
 
-        if( argc>0 ) {
-            free_args(argc, args);
-        }
-
-        if( succ ) {
-            printf("success\n", i);
-        } else {
-            printf("fail\n", i);
-        }
+        free_args(argc, args);
     }  
-    return 0;
+    return ret;
 }
 
 int main(int argc, char *argv[])
 {
-    printf("+--------- test_parse_args ----------+\n");
-    test_parse_args();   
+    printf("[ test_parse_args ]\n");
+    if( test_parse_args()!=0 ) {
+        printf("Fail\n");
+    } else {
+        printf("Success\n");
+    }
     return 0;
 }

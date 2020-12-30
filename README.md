@@ -23,5 +23,6 @@ echo "help" | ./client
 
 - Use unit framework
 - server mode
-
+- Fix mem leak at line: 141
+- Fix mem leak for `line`
 
