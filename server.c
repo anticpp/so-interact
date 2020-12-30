@@ -31,11 +31,17 @@ static int do_command_shutdown(int argc, char **args);
 static int do_command_help(int argc, char **args);
 static int do_command_state(int argc, char **args);
 static int do_command_listen(int argc, char **args);
+static int do_command_accept(int argc, char **args);
+static int do_command_list(int argc, char **args);
+static int do_command_unlisten(int argc, char **args);
 
 static command_t commands[] = {
     {"help", 0, 0, "Help message", do_command_help},
     {"state", 0, 0, "Show listen state", do_command_state},
     {"listen", 2, "`ip` `port`", "Listen on ip:port", do_command_listen},
+    {"accept", 0, 0, "Accept connection", do_command_accept},
+    {"list", 0, 0, "List connections", do_command_list},
+    {"unlisten", 0, 0, "Unlisten", do_command_unlisten},
     /*{"help", 0, 0, "Help message", do_command_help},
     {"state", }
     {"accept", }
@@ -65,13 +71,22 @@ typedef enum {
 
 const char *state_str[] = {"s_init", "s_listen"};
 
-#define MAX_CLIENT_N 100
+#define MAX_CONN_N 100
 
 /* server */
 typedef struct {
+    int cfd;
+    struct sockaddr_in addr;
+    socklen_t addr_len;
+} conn_t;
+
+typedef struct {
     state_t state; 
     int sfd;
-    int cfds[MAX_CLIENT_N]; // Client fds
+
+    /* Connections */
+    conn_t conns[MAX_CONN_N];
+    int conns_n;
 } server_t;
 
 static server_t server;
@@ -83,7 +98,7 @@ int main(int argc, char **argv) {
     /* Init server */
     server.state = s_init;
     server.sfd = 0;
-    memset(server.cfds, 0x00, MAX_CLIENT_N*sizeof(int));
+    server.conns_n = 0;
 
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
@@ -170,7 +185,7 @@ int do_command_state(int argc, char **args) {
 
 int do_command_listen(int argc, char **args) {
     const char *ip = args[1];
-    short port = atoi(args[2]);
+    unsigned short port = atoi(args[2]);
 
     if( server.state!=s_init ) {
         printf("Error state: `%s`\n", state_str[server.state]);
@@ -217,4 +232,67 @@ int do_command_listen(int argc, char **args) {
     printf("Listen %s:%d succ \n", ip, port);
 }
 
+int do_command_accept(int argc, char **args) {
+    if( server.state!=s_listen ) {
+        printf("Error state: `%s`\n", state_str[server.state]);
+        printf("Listen before accept.\n");
+        return 1;
+    }
+    if( server.conns_n>= MAX_CONN_N ) {
+        printf("Too much connections accepted, MAX_CONN_N %d\n", MAX_CONN_N);
+        return 1;
+    }
 
+    printf("Accepting ...\n");
+    conn_t *conn = &(server.conns[server.conns_n]);
+    conn->addr_len = sizeof(conn->addr);
+
+    conn->cfd = accept(server.sfd, (struct sockaddr*)&(conn->addr), &(conn->addr_len));
+    if( conn->cfd<0 ) {
+        printf("accept error: %s\n", strerror(errno));
+        return 1;
+    }
+
+    char ip[32] = {0};
+    unsigned short port = 0;
+    if( inet_ntop(AF_INET, &(conn->addr.sin_addr), ip, conn->addr_len)<0 ) {
+        printf("warning: inet_ntop error: %s\n", strerror(errno));
+    }
+    port = ntohs(conn->addr.sin_port);
+
+    printf("Accepted connection %s:%d\n", ip, port);
+    printf("Fd %d\n", conn->cfd);
+
+    server.conns_n ++;
+
+    return 0;
+}
+
+int do_command_list(int argc, char **args) {
+    char ip[32] = {0};
+    unsigned short port = 0;
+
+    printf("Connections(%d)\n", server.conns_n);
+    for( int i=0; i<server.conns_n; i++ ) {
+        conn_t *conn = &(server.conns[i]);
+        inet_ntop(AF_INET, &(conn->addr.sin_addr), ip, conn->addr_len);
+        port = ntohs(conn->addr.sin_port);
+        printf("[%d] %s:%d\n", conn->cfd, ip, port);
+    }
+    return 0;
+}
+
+int do_command_unlisten(int argc, char **args) {
+    if( server.state!=s_listen ) {
+        printf("Error state: `%s`\n", state_str[server.state]);
+        printf("Not listen state.\n");
+        return 1;
+    }
+
+    /* Just close listen fd */
+    close(server.sfd);
+
+    server.sfd = 0;
+    server.state = s_init;
+    printf("Unlisten succ\n");
+}

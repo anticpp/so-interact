@@ -27,3 +27,5 @@ echo "help" | ./client
     + Done
 - Fix mem leak for `client.c`'s `line`
     + Done
+- Support v6
+- Support nonblock socket
