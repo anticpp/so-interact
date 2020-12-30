@@ -15,21 +15,12 @@
 #include "args.c"
 #include "printbuf.c"
 
-
 /* Linenoise callback */
 static void completion(const char *buf, linenoiseCompletions *lc);
 static char *hints(const char *buf, int *color, int *bold);
 
 /* Commands */
 typedef int (*do_command)(int argc, char **args);
-
-static int do_command_help(int argc, char **args);
-static int do_command_state(int argc, char **args);
-static int do_command_connect(int argc, char **args);
-static int do_command_read(int argc, char **args);
-static int do_command_write(int argc, char **args);
-static int do_command_close(int argc, char **args);
-static int do_command_shutdown(int argc, char **args);
 
 typedef struct {
     const char *name;
@@ -42,6 +33,16 @@ typedef struct {
     do_command handler;
 } command_s; 
 
+static int do_command_help(int argc, char **args);
+static int do_command_state(int argc, char **args);
+static int do_command_connect(int argc, char **args);
+static int do_command_read(int argc, char **args);
+static int do_command_write(int argc, char **args);
+static int do_command_close(int argc, char **args);
+static int do_command_shutdown(int argc, char **args);
+
+static command_s* lookup_command(const char* name);
+
 command_s commands[] = {
     {"help", 0, 0, "Help message", do_command_help},
     {"state", 0, 0, "Show connection state", do_command_state},
@@ -51,6 +52,8 @@ command_s commands[] = {
     {"close", 0, 0, "Close connection", do_command_close},
     {"shutdown", 1, "read|write", "Shutdown connection", do_command_shutdown},
 };
+
+
 
 /* Connection state */
 typedef enum {
@@ -87,34 +90,22 @@ int main(int argc, char **argv) {
         largc = parse_args(line, largs, MAX_ARG_SIZE);
         if( largc<0 ) {
             fprintf(stderr, "Parse line error: '%s'\n", line);
-            continue;
         } else if( largc==0 ) {
-            // empty line
-            continue;
-        }
+            /* Empty line */
+            /* Do nothing */
+        } else {
+            linenoiseHistoryAdd(line);
+            linenoiseHistorySave(HISTORY_LOG);
 
-        linenoiseHistoryAdd(line);
-        linenoiseHistorySave(HISTORY_LOG);
-
-        int i = 0;
-        int cmd_n = sizeof(commands)/sizeof(command_s);
-        for( ; i<cmd_n; i++ ) {
-            command_s *cmd = &commands[i];
-            if( strcmp(largs[0], cmd->name)!=0 ) {
-                continue;
-            }
-            if( largc<cmd->argc+1 ) {
+            command_s *cmd = lookup_command(largs[0]);
+            if( !cmd ) {
+                fprintf(stderr, "Command not found: '%s'\n", largs[0]);
+            } else if ( largc<cmd->argc+1 ) {
                 fprintf(stderr, "arguments error\n");
                 fprintf(stderr, "usage: %s %s\n", cmd->name, cmd->help_args);
-                break;
-            } 
-            if( cmd->handler ) {
+            } else if( cmd->handler ) {
                 cmd->handler(largc, largs);
             }
-            break;
-        }
-        if( i==cmd_n ) {
-            fprintf(stderr, "Command not found: '%s'\n", largs[0]);
         }
 
         free_args(largc, largs);
@@ -124,6 +115,9 @@ int main(int argc, char **argv) {
 }
 
 void completion(const char *buf, linenoiseCompletions *lc) {
+    /* We can not use lookup_command() here, */
+    /* because `buf` is not a complete command name. */
+    /* We match prefix of buf with command name. */
     int n = strlen(buf);
     for(int i=0; i<sizeof(commands)/sizeof(command_s); i++) {
         command_s *cmd = &commands[i];
@@ -137,16 +131,15 @@ char *hints(const char *buf, int *color, int *bold) {
     *color = 35;
     *bold = 0;
 
-    int tmp_size = 256;
-    char *tmp = malloc(tmp_size);
-    for(int i=0; i<sizeof(commands)/sizeof(command_s); i++) {
-        command_s *cmd = &commands[i];
-        if( strcasecmp(buf, cmd->name)==0 &&
-                        cmd->help_args!=0 && 
-                        strlen(cmd->help_args)!=0 ) {
-            snprintf(tmp, tmp_size, " %s", cmd->help_args); // " " + cmd->help_args
-            return tmp;
-        }
+    static char tmp[256];
+    command_s *cmd = lookup_command(buf);
+    if( !cmd ) {
+        return NULL;
+    }
+    if( cmd->help_args!=0 && 
+            strlen(cmd->help_args)!=0 ) {
+        snprintf(tmp, sizeof(tmp), " %s", cmd->help_args); // " " + cmd->help_args
+        return tmp;
     }
     return NULL;
 }
@@ -196,10 +189,10 @@ int do_command_read(int argc, char **args) {
     char buf[1024] = {0};
     size_t bytes = recv(client.cfd, buf, sizeof(buf), 0);
     if( bytes<0 ) {
-        printf("recv error: %s\r\n", strerror(errno));
+        printf("recv error: %s\n", strerror(errno));
         return 1;
     } else if( bytes==0 ) {
-        printf("Read EOF\r\n");
+        printf("Read EOF\n");
         return 1;
     }
     printf("(%d)\'", bytes);
@@ -218,7 +211,7 @@ int do_command_write(int argc, char **args) {
     char *sbuf = args[1];
     size_t bytes = send(client.cfd, sbuf, strlen(sbuf), 0);
     if( bytes<0 ) {
-        fprintf(stderr, "send error: %s\r\n", strerror(errno));
+        fprintf(stderr, "send error: %s\n", strerror(errno));
         return 1;
     }
     printf("(%d)\'%s\'\n", bytes, sbuf);
@@ -263,7 +256,7 @@ int do_command_state(int argc, char **args) {
 
 int do_command_help(int argc, char **args) {
     char tmp[256];
-    for(int i=0; i<sizeof(commands)/sizeof(command_s); i++) {
+    for( int i=0; i<sizeof(commands)/sizeof(command_s); i++ ) {
         command_s *cmd = &commands[i];
         if( cmd->help_args==0 || strlen(cmd->help_args)==0 ) {
             snprintf(tmp, sizeof(tmp), "%s", cmd->name); 
@@ -275,4 +268,14 @@ int do_command_help(int argc, char **args) {
     return 0;
 }
 
-
+command_s* lookup_command(const char* name) {
+    command_s *cmd = 0;
+    for( int i=0; i<sizeof(commands)/sizeof(command_s); i++ ) {
+        if( strcasecmp(name, commands[i].name)!=0 ) {
+            continue;
+        }
+        cmd = &commands[i];
+        break;
+    }
+    return cmd;
+}
