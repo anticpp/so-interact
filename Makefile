@@ -1,5 +1,5 @@
 
-BIN=client server
+BIN=client server unit_test
 
 all: $(BIN)
 
