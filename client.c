@@ -14,24 +14,11 @@
 #include "define.h"
 #include "args.c"
 #include "printbuf.c"
+#include "command.h"
 
 /* Linenoise callback */
 static void completion(const char *buf, linenoiseCompletions *lc);
 static char *hints(const char *buf, int *color, int *bold);
-
-/* Commands */
-typedef int (*do_command)(int argc, char **args);
-
-typedef struct {
-    const char *name;
-    int argc; // Arguments required
-
-    /* For help message */
-    const char *help_args;   // 0 or "" if no additional arguments
-    const char *help_message;
-
-    do_command handler;
-} command_s; 
 
 static int do_command_help(int argc, char **args);
 static int do_command_state(int argc, char **args);
@@ -41,9 +28,7 @@ static int do_command_write(int argc, char **args);
 static int do_command_close(int argc, char **args);
 static int do_command_shutdown(int argc, char **args);
 
-static command_s* lookup_command(const char* name);
-
-command_s commands[] = {
+static command_t commands[] = {
     {"help", 0, 0, "Help message", do_command_help},
     {"state", 0, 0, "Show connection state", do_command_state},
     {"connect", 2, "`ip` `port`", "Make connection", do_command_connect},
@@ -52,24 +37,27 @@ command_s commands[] = {
     {"close", 0, 0, "Close connection", do_command_close},
     {"shutdown", 1, "read|write", "Shutdown connection", do_command_shutdown},
 };
+static int commands_n = sizeof(commands)/sizeof(command_t);
 
-
+static inline command_t* mylookup(const char* name) {
+    return lookup_command(name, commands, commands_n);
+}
 
 /* Connection state */
 typedef enum {
     s_closed = 0,
     s_connected = 1,
-} state_e;
+} state_t;
 
 const char *state_str[] = {"s_closed", "s_connected"};
 
 /* client */
 typedef struct {
-    state_e state; 
+    state_t state; 
     int cfd;
-} client_s;
+} client_t;
 
-static client_s client;
+static client_t client;
 
 #define HISTORY_LOG ".chistory.txt"
 #define PROMPT "client > "
@@ -97,7 +85,7 @@ int main(int argc, char **argv) {
             linenoiseHistoryAdd(line);
             linenoiseHistorySave(HISTORY_LOG);
 
-            command_s *cmd = lookup_command(largs[0]);
+            command_t *cmd = mylookup(largs[0]);
             if( !cmd ) {
                 fprintf(stderr, "Command not found: '%s'\n", largs[0]);
             } else if ( largc<cmd->argc+1 ) {
@@ -115,12 +103,12 @@ int main(int argc, char **argv) {
 }
 
 void completion(const char *buf, linenoiseCompletions *lc) {
-    /* We can not use lookup_command() here, */
+    /* We can not use mylookup() here, */
     /* because `buf` is not a complete command name. */
     /* We match prefix of buf with command name. */
     int n = strlen(buf);
-    for(int i=0; i<sizeof(commands)/sizeof(command_s); i++) {
-        command_s *cmd = &commands[i];
+    for(int i=0; i<commands_n; i++) {
+        command_t *cmd = &commands[i];
         if( strncasecmp(buf, cmd->name, n)==0 ) {
             linenoiseAddCompletion(lc, cmd->name);
         }  
@@ -132,7 +120,7 @@ char *hints(const char *buf, int *color, int *bold) {
     *bold = 0;
 
     static char tmp[256];
-    command_s *cmd = lookup_command(buf);
+    command_t *cmd = mylookup(buf);
     if( !cmd ) {
         return NULL;
     }
@@ -256,8 +244,8 @@ int do_command_state(int argc, char **args) {
 
 int do_command_help(int argc, char **args) {
     char tmp[256];
-    for( int i=0; i<sizeof(commands)/sizeof(command_s); i++ ) {
-        command_s *cmd = &commands[i];
+    for( int i=0; i<commands_n; i++ ) {
+        command_t *cmd = &commands[i];
         if( cmd->help_args==0 || strlen(cmd->help_args)==0 ) {
             snprintf(tmp, sizeof(tmp), "%s", cmd->name); 
         } else {
@@ -268,14 +256,3 @@ int do_command_help(int argc, char **args) {
     return 0;
 }
 
-command_s* lookup_command(const char* name) {
-    command_s *cmd = 0;
-    for( int i=0; i<sizeof(commands)/sizeof(command_s); i++ ) {
-        if( strcasecmp(name, commands[i].name)!=0 ) {
-            continue;
-        }
-        cmd = &commands[i];
-        break;
-    }
-    return cmd;
-}

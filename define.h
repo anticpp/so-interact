@@ -1,5 +1,5 @@
-#ifndef _SO_INTERACT_H_
-#define _SO_INTERACT_H_
+#ifndef SO_INTERACT_DEFINE_H
+#define SO_INTERACT_DEFINE_H
 
 enum {
     k_space = 32,
