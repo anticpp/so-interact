@@ -35,6 +35,8 @@ static int do_command_unlisten(int argc, char **args);
 static int do_command_accept(int argc, char **args);
 static int do_command_list(int argc, char **args);
 static int do_command_close(int argc, char **args);
+static int do_command_read(int argc, char **args);
+static int do_command_write(int argc, char **args);
 
 static command_t commands[] = {
     {"help", 0, NULL, "Help message", do_command_help},
@@ -44,6 +46,8 @@ static command_t commands[] = {
     {"accept", 0, NULL, "Accept connection", do_command_accept},
     {"list", 0, NULL, "List connections", do_command_list},
     {"close", 1, " `cfd`|all", "Close connection", do_command_close},
+    {"read", 1, "`cfd`", "Read data from connection", do_command_read},
+    {"write", 2, "`cfd` `message`", "Write `message` to connection", do_command_write},
     /*{"help", 0, 0, "Help message", do_command_help},
     {"state", }
     {"accept", }
@@ -321,6 +325,44 @@ int do_command_close(int argc, char **args) {
     }
     server.conns_n --;
     printf("Connection %d closed\n", cfd);
+}
+
+int do_command_read(int argc, char **args) {
+    int cfd = atoi(args[1]);
+    int i = 0;
+    conn_t *conn = NULL;
+    for( ; i<server.conns_n; i++ ) {
+        if( server.conns[i].cfd!=cfd ) {
+            continue;
+        }
+        conn = &(server.conns[i]);
+        break;
+    }
+    if( i==server.conns_n ) {
+        printf("Connection not found, cfd %d\n", cfd);
+        printf("Use `list` command to check cfd\n", cfd);
+        return 1;
+    }
+
+    printf("Reading ...\n");
+
+    char buf[1024] = {0};
+    size_t bytes = recv(conn->cfd, buf, sizeof(buf), 0);
+    if( bytes<0 ) {
+        printf("recv error: %s\n", strerror(errno));
+        return 1;
+    } else if( bytes==0 ) {
+        printf("Read EOF\n");
+        return 1;
+    }
+    printf("%d => (%d)\'", conn->cfd, bytes);
+    printbuf(stdout, buf, strlen(buf));
+    printf("\'\n");
+
+}
+
+int do_command_write(int argc, char **args) {
+    return 1;
 }
 
 int do_command_unlisten(int argc, char **args) {
