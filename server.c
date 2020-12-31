@@ -96,6 +96,8 @@ typedef struct {
 } server_t;
 
 static server_t server;
+static conn_t* find_conn(int cfd, int *idx_ret);
+static int remove_conn(int i);
 
 #define HISTORY_LOG ".shistory.txt"
 #define PROMPT "server > "
@@ -169,6 +171,39 @@ char *hints(const char *buf, int *color, int *bold) {
         return tmp;
     }
     return NULL;
+}
+
+conn_t* find_conn(int cfd, int *idx_ret) {
+    int i = 0;
+    conn_t *conn = NULL;
+    for( ; i<server.conns_n; i++ ) {
+        if( server.conns[i].cfd!=cfd ) {
+            continue;
+        }
+        conn = &(server.conns[i]);
+        break;
+    }
+    if( idx_ret!=NULL ) {
+        *idx_ret = i;
+    }
+    return conn;
+}
+
+int remove_conn(int i) {
+    if( i>=server.conns_n ) {
+        return 0;
+    }
+
+    if( i==server.conns_n-1 ) {
+        /* Last element */
+    } else {
+        /* i<server.conns_n-1 */
+        memmove( &(server.conns[i]), 
+                 &(server.conns[i+1]),
+                 sizeof(conn_t)*(server.conns_n-1-i) );
+    }
+    server.conns_n --;
+    return 1;
 }
 
 int do_command_help(int argc, char **args) {
@@ -299,6 +334,7 @@ int do_command_close(int argc, char **args) {
     }
 
     int cfd = atoi(args[1]);
+    /*
     int i = 0;
     conn_t *conn = NULL;
     for( ; i<server.conns_n; i++ ) {
@@ -312,9 +348,19 @@ int do_command_close(int argc, char **args) {
         printf("Connection not found, cfd %d\n", cfd);
         printf("Use `list` command to check cfd\n", cfd);
         return 1;
-    }
-    close(conn->cfd);
+    }*/
 
+    int i = 0;
+    conn_t* conn = find_conn(cfd, &i);
+    if( !conn ) {
+        printf("Connection not found, cfd %d\n", cfd);
+        printf("Use `list` command to check cfd\n", cfd);
+        return 1;
+    }
+
+    close(conn->cfd);
+    remove_conn(i);
+#if 0
     if( i==server.conns_n-1 ) {
         /* Last element */
     } else {
@@ -324,21 +370,14 @@ int do_command_close(int argc, char **args) {
                  sizeof(conn_t)*(server.conns_n-1-i) );
     }
     server.conns_n --;
+#endif
     printf("Connection %d closed\n", cfd);
 }
 
 int do_command_read(int argc, char **args) {
     int cfd = atoi(args[1]);
-    int i = 0;
-    conn_t *conn = NULL;
-    for( ; i<server.conns_n; i++ ) {
-        if( server.conns[i].cfd!=cfd ) {
-            continue;
-        }
-        conn = &(server.conns[i]);
-        break;
-    }
-    if( i==server.conns_n ) {
+    conn_t* conn = find_conn(cfd, NULL);
+    if( !conn ) {
         printf("Connection not found, cfd %d\n", cfd);
         printf("Use `list` command to check cfd\n", cfd);
         return 1;
@@ -362,7 +401,34 @@ int do_command_read(int argc, char **args) {
 }
 
 int do_command_write(int argc, char **args) {
-    return 1;
+        /*
+    int cfd = atoi(args[1]);
+    int i = 0;
+    conn_t *conn = NULL;
+    for( ; i<server.conns_n; i++ ) {
+        if( server.conns[i].cfd!=cfd ) {
+            continue;
+        }
+        conn = &(server.conns[i]);
+        break;
+    }
+    if( i==server.conns_n ) {
+        printf("Connection not found, cfd %d\n", cfd);
+        printf("Use `list` command to check cfd\n", cfd);
+        return 1;
+    }
+
+    printf("Writing ...\n");
+
+    char *sbuf = args[1];
+    size_t bytes = send(client.cfd, sbuf, strlen(sbuf), 0);
+    if( bytes<0 ) {
+        fprintf(stderr, "send error: %s\n", strerror(errno));
+        return 1;
+    }
+    printf("(%d)\'%s\'\n", bytes, sbuf);
+
+    return 1;*/
 }
 
 int do_command_unlisten(int argc, char **args) {
