@@ -29,12 +29,12 @@ static int do_command_close(int argc, char **args);
 static int do_command_shutdown(int argc, char **args);
 
 static command_t commands[] = {
-    {"help", 0, 0, "Help message", do_command_help},
-    {"state", 0, 0, "Show connection state", do_command_state},
+    {"help", 0, NULL, "Help message", do_command_help},
+    {"state", 0, NULL, "Show connection state", do_command_state},
     {"connect", 2, "`ip` `port`", "Make connection", do_command_connect},
-    {"read", 0, 0, "Read data from connection", do_command_read},
+    {"read", 0, NULL, "Read data from connection", do_command_read},
     {"write", 1, "`message`", "Write `message` to connection", do_command_write},
-    {"close", 0, 0, "Close connection", do_command_close},
+    {"close", 0, NULL, "Close connection", do_command_close},
     {"shutdown", 1, "read|write", "Shutdown connection", do_command_shutdown},
 };
 static int commands_n = sizeof(commands)/sizeof(command_t);
@@ -124,7 +124,7 @@ char *hints(const char *buf, int *color, int *bold) {
     if( !cmd ) {
         return NULL;
     }
-    if( cmd->help_args!=0 && 
+    if( cmd->help_args!=NULL && 
             strlen(cmd->help_args)!=0 ) {
         snprintf(tmp, sizeof(tmp), " %s", cmd->help_args); // " " + cmd->help_args
         return tmp;
@@ -247,7 +247,7 @@ int do_command_help(int argc, char **args) {
     char tmp[256];
     for( int i=0; i<commands_n; i++ ) {
         command_t *cmd = &commands[i];
-        if( cmd->help_args==0 || strlen(cmd->help_args)==0 ) {
+        if( cmd->help_args==NULL || strlen(cmd->help_args)==0 ) {
             snprintf(tmp, sizeof(tmp), "%s", cmd->name); 
         } else {
             snprintf(tmp, sizeof(tmp), "%s %s", cmd->name, cmd->help_args);

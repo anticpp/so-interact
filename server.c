@@ -31,17 +31,19 @@ static int do_command_shutdown(int argc, char **args);
 static int do_command_help(int argc, char **args);
 static int do_command_state(int argc, char **args);
 static int do_command_listen(int argc, char **args);
+static int do_command_unlisten(int argc, char **args);
 static int do_command_accept(int argc, char **args);
 static int do_command_list(int argc, char **args);
-static int do_command_unlisten(int argc, char **args);
+static int do_command_close(int argc, char **args);
 
 static command_t commands[] = {
-    {"help", 0, 0, "Help message", do_command_help},
-    {"state", 0, 0, "Show listen state", do_command_state},
+    {"help", 0, NULL, "Help message", do_command_help},
+    {"state", 0, NULL, "Show listen state", do_command_state},
     {"listen", 2, "`ip` `port`", "Listen on ip:port", do_command_listen},
-    {"accept", 0, 0, "Accept connection", do_command_accept},
-    {"list", 0, 0, "List connections", do_command_list},
-    {"unlisten", 0, 0, "Unlisten", do_command_unlisten},
+    {"unlisten", 0, NULL, "Unlisten", do_command_unlisten},
+    {"accept", 0, NULL, "Accept connection", do_command_accept},
+    {"list", 0, NULL, "List connections", do_command_list},
+    {"close", 1, " `cfd`|all", "Close connection", do_command_close},
     /*{"help", 0, 0, "Help message", do_command_help},
     {"state", }
     {"accept", }
@@ -157,7 +159,7 @@ char *hints(const char *buf, int *color, int *bold) {
     if( !cmd ) {
         return NULL;
     }
-    if( cmd->help_args!=0 && 
+    if( cmd->help_args!=NULL && 
             strlen(cmd->help_args)!=0 ) {
         snprintf(tmp, sizeof(tmp), " %s", cmd->help_args); // " " + cmd->help_args
         return tmp;
@@ -169,7 +171,7 @@ int do_command_help(int argc, char **args) {
     char tmp[256];
     for( int i=0; i<commands_n; i++ ) {
         command_t *cmd = &commands[i];
-        if( cmd->help_args==0 || strlen(cmd->help_args)==0 ) {
+        if( cmd->help_args==NULL || strlen(cmd->help_args)==0 ) {
             snprintf(tmp, sizeof(tmp), "%s", cmd->name); 
         } else {
             snprintf(tmp, sizeof(tmp), "%s %s", cmd->name, cmd->help_args);
@@ -264,7 +266,6 @@ int do_command_accept(int argc, char **args) {
     printf("Fd %d\n", conn->cfd);
 
     server.conns_n ++;
-
     return 0;
 }
 
@@ -280,6 +281,46 @@ int do_command_list(int argc, char **args) {
         printf("[%d] %s:%d\n", conn->cfd, ip, port);
     }
     return 0;
+}
+
+int do_command_close(int argc, char **args) {
+    if( strcasecmp(args[1], "all")==0 ) {
+        /* CLose all */
+        for( int i=0; i<server.conns_n; i++ ) {
+            close(server.conns[i].cfd);
+            printf("Connection %d closed\n", server.conns[i].cfd);
+        }
+        server.conns_n = 0;
+        return 0;
+    }
+
+    int cfd = atoi(args[1]);
+    int i = 0;
+    conn_t *conn = NULL;
+    for( ; i<server.conns_n; i++ ) {
+        if( server.conns[i].cfd!=cfd ) {
+            continue;
+        }
+        conn = &(server.conns[i]);
+        break;
+    }
+    if( i==server.conns_n ) {
+        printf("Connection not found, cfd %d\n", cfd);
+        printf("Use `list` command to check cfd\n", cfd);
+        return 1;
+    }
+    close(conn->cfd);
+
+    if( i==server.conns_n-1 ) {
+        /* Last element */
+    } else {
+        /* i<server.conns_n-1 */
+        memmove( &(server.conns[i]), 
+                 &(server.conns[i+1]),
+                 sizeof(conn_t)*(server.conns_n-1-i) );
+    }
+    server.conns_n --;
+    printf("Connection %d closed\n", cfd);
 }
 
 int do_command_unlisten(int argc, char **args) {
