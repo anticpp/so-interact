@@ -17,12 +17,14 @@ make all
 
 ```
 echo "help" | ./client
+echo "help" | ./server
 ```
 
 ## TODO
 
 - Use unit framework
 - server mode
+    + Done
 - Fix mem leak at line `client.c:141`
     + Done
 - Fix mem leak for `client.c`'s `line`

@@ -1,6 +1,3 @@
-#ifndef SO_INTERACT_COMMAND_H
-#define SO_INTERACT_COMMAND_H
-
 typedef int (*command_handler)(int argc, char **args);
 
 typedef struct {
@@ -26,4 +23,3 @@ static command_t* lookup_command(const char* name, command_t *commands, int size
     return cmd;
 }
 
-#endif

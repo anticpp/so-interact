@@ -14,12 +14,13 @@
 #include "define.h"
 #include "args.c"
 #include "printbuf.c"
-#include "command.h"
+#include "command.c"
 
 /* Linenoise callback */
 static void completion(const char *buf, linenoiseCompletions *lc);
 static char *hints(const char *buf, int *color, int *bold);
 
+/* Commands */
 static int do_command_help(int argc, char **args);
 static int do_command_state(int argc, char **args);
 static int do_command_connect(int argc, char **args);
@@ -66,6 +67,9 @@ int main(int argc, char **argv) {
     /* Init client */
     client.state = s_closed;
     client.cfd = 0;
+
+    /* Signal */
+    signal(SIGPIPE, SIG_IGN);
 
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
@@ -175,7 +179,7 @@ int do_command_read(int argc, char **args) {
     printf("Reading ...\n");
 
     char buf[1024] = {0};
-    size_t bytes = recv(client.cfd, buf, sizeof(buf), 0);
+    ssize_t bytes = recv(client.cfd, buf, sizeof(buf), 0);
     if( bytes<0 ) {
         printf("recv error: %s\n", strerror(errno));
         return 1;
@@ -186,6 +190,7 @@ int do_command_read(int argc, char **args) {
     printf("(%d)\'", bytes);
     printbuf(stdout, buf, strlen(buf));
     printf("\'\n");
+    return 0;
 }
 
 int do_command_write(int argc, char **args) {
@@ -197,12 +202,13 @@ int do_command_write(int argc, char **args) {
     printf("Writing ...\n");
 
     char *sbuf = args[1];
-    size_t bytes = send(client.cfd, sbuf, strlen(sbuf), 0);
+    ssize_t bytes = send(client.cfd, sbuf, strlen(sbuf), 0);
     if( bytes<0 ) {
         fprintf(stderr, "send error: %s\n", strerror(errno));
         return 1;
     }
     printf("(%d)\'%s\'\n", bytes, sbuf);
+    return 0;
 }
 
 int do_command_close(int argc, char **args) {
@@ -215,6 +221,7 @@ int do_command_close(int argc, char **args) {
     client.cfd = 0;
     client.state = s_closed;
     printf("Closed\n");
+    return 0;
 }
 
 int do_command_shutdown(int argc, char **args) {
@@ -237,10 +244,12 @@ int do_command_shutdown(int argc, char **args) {
         return 1;
     }
     printf("OK\n");
+    return 0;
 }
 
 int do_command_state(int argc, char **args) {
     printf("%s\n", state_str[client.state]);
+    return 0;
 }
 
 int do_command_help(int argc, char **args) {

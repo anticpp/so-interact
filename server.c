@@ -10,24 +10,18 @@
 #include <termios.h>
 #include <time.h>
 #include <ctype.h>
+#include <signal.h>
 #include <linenoise/linenoise.h>
 #include "define.h"
 #include "args.c"
 #include "printbuf.c"
-#include "command.h"
+#include "command.c"
 
 /* Linenoise callback */
 static void completion(const char *buf, linenoiseCompletions *lc);
 static char *hints(const char *buf, int *color, int *bold);
-/*
-static int do_command_help(int argc, char **args);
-static int do_command_state(int argc, char **args);
-static int do_command_connect(int argc, char **args);
-static int do_command_read(int argc, char **args);
-static int do_command_write(int argc, char **args);
-static int do_command_close(int argc, char **args);
-static int do_command_shutdown(int argc, char **args);
-*/
+
+/* Commands */
 static int do_command_help(int argc, char **args);
 static int do_command_state(int argc, char **args);
 static int do_command_listen(int argc, char **args);
@@ -37,6 +31,7 @@ static int do_command_list(int argc, char **args);
 static int do_command_close(int argc, char **args);
 static int do_command_read(int argc, char **args);
 static int do_command_write(int argc, char **args);
+static int do_command_shutdown(int argc, char **args);
 
 static command_t commands[] = {
     {"help", 0, NULL, "Help message", do_command_help},
@@ -48,20 +43,7 @@ static command_t commands[] = {
     {"close", 1, " `cfd`|all", "Close connection", do_command_close},
     {"read", 1, "`cfd`", "Read data from connection", do_command_read},
     {"write", 2, "`cfd` `message`", "Write `message` to connection", do_command_write},
-    /*{"help", 0, 0, "Help message", do_command_help},
-    {"state", }
-    {"accept", }
-    {"read", }
-    {"write", }
-    {"close", }
-    {"shutdown", }*/
- /*   {"help", 0, 0, "Help message", do_command_help},
-    {"connect", 2, "`ip` `port`", "Make connection", do_command_connect},
-    {"read", 0, 0, "Read data from connection", do_command_read},
-    {"write", 1, "`message`", "Write `message` to connection", do_command_write},
-    {"close", 0, 0, "Close connection", do_command_close},
-    {"shutdown", 1, "read|write", "Shutdown connection", do_command_shutdown},
-    */
+    {"shutdown", 2, "`cfd` read|write", "Shutdown connection", do_command_shutdown},
 };
 static int commands_n = sizeof(commands)/sizeof(command_t);
 
@@ -107,6 +89,9 @@ int main(int argc, char **argv) {
     server.state = s_init;
     server.sfd = 0;
     server.conns_n = 0;
+
+    /* Signal */
+    signal(SIGPIPE, SIG_IGN);
 
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
@@ -222,6 +207,7 @@ int do_command_help(int argc, char **args) {
 
 int do_command_state(int argc, char **args) {
     printf("%s\n", state_str[server.state]);
+    return 0;
 }
 
 int do_command_listen(int argc, char **args) {
@@ -271,6 +257,23 @@ int do_command_listen(int argc, char **args) {
 
     server.state = s_listen;
     printf("Listen %s:%d succ \n", ip, port);
+    return 0;
+}
+
+int do_command_unlisten(int argc, char **args) {
+    if( server.state!=s_listen ) {
+        printf("Error state: `%s`\n", state_str[server.state]);
+        printf("Not listen state.\n");
+        return 1;
+    }
+
+    /* Close listen fd */
+    close(server.sfd);
+
+    server.sfd = 0;
+    server.state = s_init;
+    printf("Unlisten succ\n");
+    return 0;
 }
 
 int do_command_accept(int argc, char **args) {
@@ -301,8 +304,8 @@ int do_command_accept(int argc, char **args) {
     }
     port = ntohs(conn->addr.sin_port);
 
-    printf("Accepted connection %s:%d\n", ip, port);
-    printf("Fd %d\n", conn->cfd);
+    printf("Accepted %d\n", conn->cfd);
+    printf("Addr %s:%d\n", ip, port);
 
     server.conns_n ++;
     return 0;
@@ -334,21 +337,6 @@ int do_command_close(int argc, char **args) {
     }
 
     int cfd = atoi(args[1]);
-    /*
-    int i = 0;
-    conn_t *conn = NULL;
-    for( ; i<server.conns_n; i++ ) {
-        if( server.conns[i].cfd!=cfd ) {
-            continue;
-        }
-        conn = &(server.conns[i]);
-        break;
-    }
-    if( i==server.conns_n ) {
-        printf("Connection not found, cfd %d\n", cfd);
-        printf("Use `list` command to check cfd\n", cfd);
-        return 1;
-    }*/
 
     int i = 0;
     conn_t* conn = find_conn(cfd, &i);
@@ -360,18 +348,8 @@ int do_command_close(int argc, char **args) {
 
     close(conn->cfd);
     remove_conn(i);
-#if 0
-    if( i==server.conns_n-1 ) {
-        /* Last element */
-    } else {
-        /* i<server.conns_n-1 */
-        memmove( &(server.conns[i]), 
-                 &(server.conns[i+1]),
-                 sizeof(conn_t)*(server.conns_n-1-i) );
-    }
-    server.conns_n --;
-#endif
     printf("Connection %d closed\n", cfd);
+    return 0;
 }
 
 int do_command_read(int argc, char **args) {
@@ -379,14 +357,13 @@ int do_command_read(int argc, char **args) {
     conn_t* conn = find_conn(cfd, NULL);
     if( !conn ) {
         printf("Connection not found, cfd %d\n", cfd);
-        printf("Use `list` command to check cfd\n", cfd);
         return 1;
     }
 
     printf("Reading ...\n");
 
     char buf[1024] = {0};
-    size_t bytes = recv(conn->cfd, buf, sizeof(buf), 0);
+    ssize_t bytes = recv(conn->cfd, buf, sizeof(buf), 0);
     if( bytes<0 ) {
         printf("recv error: %s\n", strerror(errno));
         return 1;
@@ -397,51 +374,50 @@ int do_command_read(int argc, char **args) {
     printf("%d => (%d)\'", conn->cfd, bytes);
     printbuf(stdout, buf, strlen(buf));
     printf("\'\n");
-
+    return 0;
 }
 
 int do_command_write(int argc, char **args) {
-        /*
     int cfd = atoi(args[1]);
-    int i = 0;
-    conn_t *conn = NULL;
-    for( ; i<server.conns_n; i++ ) {
-        if( server.conns[i].cfd!=cfd ) {
-            continue;
-        }
-        conn = &(server.conns[i]);
-        break;
-    }
-    if( i==server.conns_n ) {
+    conn_t* conn = find_conn(cfd, NULL);
+    if( !conn ) {
         printf("Connection not found, cfd %d\n", cfd);
-        printf("Use `list` command to check cfd\n", cfd);
         return 1;
     }
 
     printf("Writing ...\n");
 
-    char *sbuf = args[1];
-    size_t bytes = send(client.cfd, sbuf, strlen(sbuf), 0);
+    char *sbuf = args[2];
+    ssize_t bytes = send(cfd, sbuf, strlen(sbuf), 0);
     if( bytes<0 ) {
-        fprintf(stderr, "send error: %s\n", strerror(errno));
+        printf("send error: %s\n", strerror(errno));
         return 1;
     }
     printf("(%d)\'%s\'\n", bytes, sbuf);
-
-    return 1;*/
+    return 0;
 }
 
-int do_command_unlisten(int argc, char **args) {
-    if( server.state!=s_listen ) {
-        printf("Error state: `%s`\n", state_str[server.state]);
-        printf("Not listen state.\n");
+int do_command_shutdown(int argc, char **args) {
+    int cfd = atoi(args[1]);
+    conn_t* conn = find_conn(cfd, NULL);
+    if( !conn ) {
+        printf("Connection not found, cfd %d\n", cfd);
         return 1;
     }
 
-    /* Just close listen fd */
-    close(server.sfd);
-
-    server.sfd = 0;
-    server.state = s_init;
-    printf("Unlisten succ\n");
+    int flag = 0;
+    if( strcmp(args[2], "read")==0 ) {
+        flag = SHUT_RD;
+    } else if ( strcmp(args[2], "write")==0 ) {
+        flag = SHUT_WR;
+    } else {
+        printf("Invalid shutdown mode `%s`\n", args[1]);
+        return 1;
+    }
+    if( shutdown(cfd, flag)<0 ) {
+        printf("shutdown error: %s\n", strerror(errno));
+        return 1;
+    }
+    printf("OK\n");
+    return 0;
 }
