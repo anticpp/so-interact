@@ -10,6 +10,7 @@
 #include <termios.h>
 #include <time.h>
 #include <ctype.h>
+#include <signal.h>
 #include <linenoise/linenoise.h>
 #include "define.h"
 #include "args.c"
